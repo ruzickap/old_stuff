@@ -1,0 +1,29 @@
+<sources>
+    <programs>
+        <default pathversion="1"></default>
+    </programs>
+    <video>
+        <default pathversion="1"></default>
+        <source>
+            <name>_____Movies_____</name>
+            <path pathversion="1">/home/data/share/_____Movies_____/</path>
+        </source>
+    </video>
+    <music>
+        <default pathversion="1">_____MP3_____</default>
+        <source>
+            <name>_____MP3_____</name>
+            <path pathversion="1">/home/data/share/_____MP3_____/</path>
+        </source>
+    </music>
+    <pictures>
+        <default pathversion="1">photos</default>
+        <source>
+            <name>photos</name>
+            <path pathversion="1">/home/data2/photos/</path>
+        </source>
+    </pictures>
+    <files>
+        <default pathversion="1"></default>
+    </files>
+</sources>

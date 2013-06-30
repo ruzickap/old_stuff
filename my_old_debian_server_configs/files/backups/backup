@@ -1,0 +1,23 @@
+#!/bin/bash
+
+BACKUP_LST="/home/backup/bin/backup.lst"
+DST_BACKUP="/home/backup/gate.xvx.cz"
+MYSQLDUMP_DEST="/home/backup/mysqldump"
+LS_DIR_FILE="/etc/ls.dir"
+RDIFF_COMMAND="rdiff-backup --no-acls --include-symbolic-links --include-globbing-filelist $BACKUP_LST --print-statistics --verbosity 3 --exclude / / $DST_BACKUP && rdiff-backup --force --remove-older-than 2M $DST_BACKUP"
+
+pgrep rdiff-backup && echo -e "Proces \"rdiff-backup\" already running\n" && exit
+
+find /boot /etc /home /root /var /usr \( -path /var/cache -or -path /var/tmp \) -prune -o -type f -ls > $LS_DIR_FILE
+
+echo "********** MYSQL **********"
+echo /usr/bin/mysqldump --host=localhost --user=root --add-drop-table --all-databases 
+/usr/bin/mysqldump --host=localhost --user=root --add-drop-table --all-databases > $MYSQLDUMP_DEST
+
+echo "********** RDIFF **********"
+time eval $RDIFF_COMMAND
+
+rm $LS_DIR_FILE $MYSQLDUMP_DEST
+echo -e "\nLocal:"
+df -h $DST_BACKUP
+

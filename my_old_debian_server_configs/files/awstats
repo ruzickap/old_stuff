@@ -1,0 +1,30 @@
+#!/bin/bash
+
+DEFAULT=/etc/default/awstats
+AWSTATS=/usr/lib/cgi-bin/awstats.pl
+AWSTATS_BUILDSTATICPAGES=/usr/share/awstats/tools/awstats_buildstaticpages.pl
+AWSTATS_UPDATEALL=/usr/share/doc/awstats/examples/awstats_updateall.pl
+
+[ -f $AWSTATS -a -f $AWSTATS_BUILDSTATICPAGES -a -f $AWSTATS_UPDATEALL -a -d /etc/awstats/ ] || exit 1
+
+# Set defaults.
+AWSTATS_NICE=10
+[ ! -r "$DEFAULT" ] || . "$DEFAULT"
+
+$AWSTATS_UPDATEALL now -awstatsprog=$AWSTATS -configdir=/etc/awstats/ -excludeconf=awstats.conf > /dev/null
+
+#
+# Static pages:
+#
+#for FILE in /etc/awstats/awstats.{ftp,http,https,smtp}*.conf; do
+#  CONFIG=`echo $FILE | sed 's/.*awstats\.\([ftp|http|https|smtp].*\)\.conf$/\1/'`
+#  if [[ "$CONFIG" == *-xvx.cz ]]; then
+#    OUTPUT_DIR=/var/www/myadmin/awstats/$CONFIG
+#  else
+#    DOMAIN=${CONFIG#*-}
+#    OUTPUT_DIR=/home/sites/$DOMAIN/www/awstats/$CONFIG
+#  fi
+#  echo "*** FILE: $FILE | CONFIG: $CONFIG | DOMAIN: $DOMAIN | OUTPUT_DIR: $OUTPUT_DIR"
+#  test -d $OUTPUT_DIR || mkdir -p $OUTPUT_DIR
+#  nice -n $AWSTATS_NICE $AWSTATS_BUILDSTATICPAGES -debug=3 -config=$CONFIG awstatsprog=$AWSTATS -dir=$OUTPUT_DIR > /dev/null
+#done

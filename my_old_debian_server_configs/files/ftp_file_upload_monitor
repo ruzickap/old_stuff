@@ -1,0 +1,22 @@
+#!/bin/bash
+
+DIRECTORY="/srv/ftp/incoming"
+TMP_FILE=`mktemp`
+TMP_PREV_FILE="/tmp/ftp_file_upload_monitor"
+DIFF_COMMAND="diff --report-identical-files"
+EMAIL="petr.ruzicka@gmail.com"
+
+find $DIRECTORY -ls >$TMP_FILE
+
+if [ -s $TMP_PREV_FILE ]; then 
+  #echo $DIFF_COMMAND $TMP_PREV_FILE $TMP_FILE
+  DIFF_RESULT=`$DIFF_COMMAND $TMP_PREV_FILE $TMP_FILE`
+  #echo $DIFF_RESULT
+  #echo "Files $TMP_PREV_FILE and $TMP_FILE are identical"
+  if [ "$DIFF_RESULT" != "Files $TMP_PREV_FILE and $TMP_FILE are identical" ]; then
+    #echo -e "df -h $DIRECTORY\n\n`df -h $DIRECTORY`\n------------------------------------------------------\n\n$DIFF_RESULT"
+    echo -e "df -h $DIRECTORY\n\n`df -h $DIRECTORY`\n------------------------------------------------------\n\n$DIFF_RESULT" | mailx -s "ftp_file_upload_monitor: $DIRECTORY changed" $EMAIL
+  fi
+fi
+
+mv $TMP_FILE $TMP_PREV_FILE

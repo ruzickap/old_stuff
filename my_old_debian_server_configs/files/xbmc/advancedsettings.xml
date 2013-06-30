@@ -1,0 +1,29 @@
+<languagecodes>
+    <code><short>cz</short><long>Czech</long></code>
+    <code><short>CS</short><long>Czech</long></code>
+    <code><short>CZE</short><long>Czech</long></code>
+    <code><short>EN</short><long>English</long></code>
+    <code><short>ENG</short><long>English</long></code>
+</languagecodes>
+
+<video>
+  <excludefromscan>
+    <regexp>[-\._ ](sample|trailer)[-\._ ]</regexp>
+  </excludefromscan>
+  <excludetvshowsfromscan>
+    <regexp>[-\._ ](sample|trailer)[-\._ ]</regexp>
+  </excludetvshowsfromscan>
+</video>
+
+<advancedsettings>
+    <videolibrary>
+	<cleanonupdate>true</cleanonupdate>  <!-- set to false to prevent xbmc from removing items from the database while updating -->
+    </videolibrary>
+    <cputempcommand>sensors | grep 'CPU Temperature' | awk '{ print $3 }'</cputempcommand>
+    <gputempcommand>echo "$(nvclock -T | sed -ne "s/=> GPU temp.*: \([0-9]\+\).*/\1/p") C"</gputempcommand>
+    <hddtempcommand>echo "$(hddtemp -n /dev/sda) C"</hddtempcommand>
+</advancedsettings>
+
+<pictures>
+  <screenshotpath>/home/xbmc/</screenshotpath>
+</pictures>

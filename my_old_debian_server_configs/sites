@@ -1,0 +1,705 @@
+#!/bin/bash
+
+
+usage() {
+cat << EOF
+
+Usage: 
+
+* Create only DNS records: 
+    $0 --domain="xvx.cz"
+
+* Create Wordpress site
+    $0 --wordpress-password="xxxx" --wordpress-title="linux.xvx.cz" --wordpress-admin-email="webmaster@xvx.cz" --wordpress-admin-name="admin" --user-password="xxxx" --ca-password="xxxxx" --domain="linux.xvx.cz" --cert-password="xxxx" --email=test@test.com
+
+* Create Moin site
+    $0 --moin-sitename="a.xvx.cz" --moin-user="admin" --moin-user-alias="admin" --moin-user-password="xxxx" --moin-user-email="admin@a.xvx.cz" --user-password="xxxx" --ca-password="xxxxx" --domain="a.xvx.cz" --cert-password="xxxx" --email=test@test.com
+
+* Create simple space for html pages
+    $0 --user-password="xxxx" --ca-password="xxxxx" --domain="medlanky.net" --cert-password="xxxx" --email=test@test.com
+
+* Delete domain
+    $0 --delete="medlanky.net" --ca-password="xxxxx" --email="admin@a.xvx.cz"
+EOF
+exit 2
+}
+
+
+########################
+# bind / dns
+########################
+configure_dns() {
+# http://www.root.cz/clanky/bezpecne-domeny-s-opendnssec/
+# https://lists.nominet.org.uk/pipermail/opendnssec-user/2010-May/000547.html
+
+# If domain is not www.something.com - third level domain
+  if [ -z "$THIRD_LEVEL_DOMAIN" ]; then
+    mkdir -p $DNS_BASEDIR/${DOMAIN}
+    cat > $DNS_BASEDIR/${DOMAIN}/db.${DOMAIN} << EOF
+; BIND database file for domain ${DOMAIN}
+\$TTL 3D
+@               IN      SOA     ns.${DOMAIN}.        info.${DOMAIN}. (
+                        `date +%Y%m%d01` ; serial
+                        3H ; refresh
+                        1H ; retry
+                        3W ; expire
+                        1H ) ; default_ttl
+
+                        NS      ns.${DOMAIN}.
+                        NS      ns2.${DOMAIN}.
+
+                        MX      1        aspmx.l.google.com.
+                        MX      5        alt1.aspmx.l.google.com.
+                        MX      5        alt2.aspmx.l.google.com.
+                        MX      10       aspmx2.googlemail.com.
+                        MX      10       aspmx3.googlemail.com.
+
+${DOMAIN}.			A	$IP
+${DOMAIN}.			TXT	v=spf1 a include:_spf.google.com ~all
+ns			A	$IP
+ns2			A	$IP
+www				CNAME	${DOMAIN}.
+EOF
+
+      cat >> /etc/bind/named.conf.local << EOF
+
+// ${DOMAIN}
+zone "${DOMAIN}" IN {
+        type master;
+        file "$DNS_BASEDIR/${DOMAIN}/db.${DOMAIN}";
+        allow-query { any; };
+};
+// ${DOMAIN} - end
+EOF
+
+    chown -R bind:root $DNS_BASEDIR/${DOMAIN}
+  else
+    echo "$THIRD_LEVEL_DOMAIN		CNAME	${SECOND_LEVEL_DOMAIN}." >> $DNS_BASEDIR/${SECOND_LEVEL_DOMAIN}/db.${SECOND_LEVEL_DOMAIN}
+  fi
+}
+
+delete_dns() {
+  if [ -z "$THIRD_LEVEL_DOMAIN" ]; then
+    rm -rf $DNS_BASEDIR/${DELETE_DOMAIN}
+    sed -i "/^\/\/ ${DELETE_DOMAIN}/,/^\/\/ ${DELETE_DOMAIN} - end/d" /etc/bind/named.conf.local
+  else
+    sed -i "/^$THIRD_LEVEL_DOMAIN/d" $DNS_BASEDIR/${SECOND_LEVEL_DOMAIN}/db.${SECOND_LEVEL_DOMAIN}
+  fi
+
+}
+
+########################
+# Create Home
+########################
+create_user_home() {
+  mkdir -p $SITES_BASEDIR/${DOMAIN}/www/{htdocs,cgi-bin} $SITES_BASEDIR/${DOMAIN}/{.ssh,ssh} /etc/ssl/localcerts/${DOMAIN}/httpd
+
+  useradd --comment "${EMAIL}" --home "$SITES_BASEDIR/${DOMAIN}/." --groups sites -M --shell /sbin/noshell ${DOMAIN}
+  echo -e "$USER_PASSWORD\n$USER_PASSWORD\n" | passwd ${DOMAIN}
+  echo -e "${DOMAIN}:\t${EMAIL}" >> /etc/aliases
+  newaliases
+}
+
+delete_user_home() {
+  if grep -q "${DELETE_DOMAIN}" /etc/passwd; then 
+    rm -rf $SITES_BASEDIR/${DELETE_DOMAIN} /etc/ssl/localcerts/${DELETE_DOMAIN}
+    userdel --force ${DELETE_DOMAIN}
+    sed -i "/^${DOMAIN}/d" /etc/aliases
+    newaliases
+  fi
+}
+
+
+########################
+# SSH
+########################
+configure_ssh() {
+  chmod 700 $SITES_BASEDIR/${DOMAIN}/.ssh
+  ssh-keygen -b 4096 -N "" -f $SITES_BASEDIR/${DOMAIN}/.ssh/id_rsa > /dev/null
+  cp $SITES_BASEDIR/${DOMAIN}/.ssh/id_rsa.pub $SITES_BASEDIR/${DOMAIN}/.ssh/authorized_keys
+  #ssh-keygen -P $CA_PASSWORD -N "" -C "${DOMAIN} ssh certificate" -s /etc/ssl/CA/private/my-ssh-ca -I ${DOMAIN} -O force-command="internal-sftp" -O no-port-forwarding -n ${DOMAIN} $SITES_BASEDIR/${DOMAIN}/.ssh/id_rsa.pub
+  chmod 600 $SITES_BASEDIR/${DOMAIN}/.ssh/authorized_keys
+  chown ${DOMAIN}:${DOMAIN} -R $SITES_BASEDIR/${DOMAIN}/.ssh/
+
+  #cp -rv $SITES_BASEDIR/${DOMAIN}/.ssh $SITES_BASEDIR/${DOMAIN}/ssh/
+  cd $SITES_BASEDIR/${DOMAIN}/ssh/
+  ln -s ../.ssh/* .
+  #chown root:${DOMAIN} $SITES_BASEDIR/${DOMAIN}/ssh/
+  #chmod g+x $SITES_BASEDIR/${DOMAIN}/ssh/
+  #chmod g+r $SITES_BASEDIR/${DOMAIN}/ssh/*
+}
+
+
+########################
+# vsftpd
+########################
+configure_vsftpd() {
+  echo "${DOMAIN}" >> /etc/vsftpd.chroot_list
+}
+
+delete_vsftpd() {
+  grep -q "${DELETE_DOMAIN}" /etc/vsftpd.chroot_list && sed -i "/^${DELETE_DOMAIN}/d" /etc/vsftpd.chroot_list
+}
+
+
+########################
+# SSL
+########################
+configure_ssl_cetificate() {
+  export SUBJECTALTNAME="DNS:${DOMAIN}, DNS:*.${DOMAIN}"
+  SUBJ="
+C=CZ
+ST=Czech Republic
+O=xvx.cz
+OU=XVX.CZ
+L=Brno
+CN=${DOMAIN}
+emailAddress=webmaster@${DOMAIN}
+"
+
+  (
+    umask 007
+    ## Create RSA private key
+    openssl genrsa -passout pass:$CERT_PASSWORD -des3 -out $CERT_PATH/${DOMAIN}-server.key 2048
+    openssl rsa -passin pass:${CERT_PASSWORD} -in $CERT_PATH/${DOMAIN}-server.key -out $CERT_PATH/${DOMAIN}-server.key.decrypted
+    ## Create Certificate Signing Request with the server RSA private key:
+    openssl req -config /etc/ssl/openssl-my.cnf -passin pass:$CERT_PASSWORD -new -subj "$(echo -n "$SUBJ" | tr "\n" "/")" -days 3650 -key $CERT_PATH/${DOMAIN}-server.key -out $CERT_PATH/${DOMAIN}-server.csr
+    openssl req -text -in $CERT_PATH/${DOMAIN}-server.csr -out $CERT_PATH/${DOMAIN}-server.csr.text
+  )
+
+  ## Use CA to sign the server's certificate
+  openssl ca -config /etc/ssl/openssl-my.cnf -passin pass:${CA_PASSWORD} -extensions v3_req -batch -in $CERT_PATH/${DOMAIN}-server.csr -out $CERT_PATH/${DOMAIN}-server.crt
+  openssl x509 -text -in $CERT_PATH/${DOMAIN}-server.crt -out $CERT_PATH/${DOMAIN}-server.crt.text
+  mkdir $SITES_BASEDIR/${DOMAIN}/www/ssl
+  cp $CERT_PATH/* $SITES_BASEDIR/${DOMAIN}/www/ssl/
+}
+
+delete_ssl_cetificate() {
+  if [ -f $CERT_PATH/${DELETE_DOMAIN}-server.crt ]; then
+    export SUBJECTALTNAME="DNS:${DELETE_DOMAIN}, DNS:*.${DELETE_DOMAIN}"
+    openssl ca -config /etc/ssl/openssl-my.cnf -passin pass:${CA_PASSWORD} -revoke $CERT_PATH/${DELETE_DOMAIN}-server.crt
+    rm $CERT_PATH/${DELETE_DOMAIN}-server.*
+    openssl ca -config /etc/ssl/openssl-my.cnf -passin pass:${CA_PASSWORD} -gencrl -out /etc/ssl/CA/crl/my-ca.crl
+    openssl crl -in /etc/ssl/CA/crl/my-ca.crl -noout -text > /etc/ssl/CA/crl/my-ca.crl.info
+    openssl crl -in /etc/ssl/CA/crl/my-ca.crl -outform DER -out /etc/ssl/CA/crl/my-ca-der.crl
+    cp /etc/ssl/CA/crl/my-ca-der.crl /var/www/
+  fi
+}
+
+########################
+# Apache / http
+########################
+configure_basic_apache() {
+  cat > /etc/apache2/sites-available/"${DOMAIN}" << EOF
+<VirtualHost *:80>
+	Use Default-http ${DOMAIN}
+</VirtualHost>
+
+<VirtualHost *:443>
+	Use Default-https ${DOMAIN}
+</VirtualHost>
+EOF
+
+  echo "<HTML><HEAD><TITLE>Testing ${DOMAIN}</TITLE></HEAD><BODY>Testing ${DOMAIN}</BODY><HTML>" > /home/sites/${DOMAIN}/www/htdocs/index.html
+  cp /var/www/favicon.ico /home/sites/${DOMAIN}/www/htdocs/
+  chown -R ${DOMAIN}:${DOMAIN} /home/sites/${DOMAIN}/www/htdocs
+
+  mkdir -p /home/sites/${DOMAIN}/www/logs
+  chown root:adm /home/sites/${DOMAIN}/www/logs
+
+  sed -i "s@\(^/var/log/apache2/\*\.log.*\) {@\1 /home/sites/${DOMAIN}/www/logs/\*\.log {@" /etc/logrotate.d/apache2
+}
+
+delete_basic_apache() {
+  if [ -f /etc/apache2/sites-available/"${DELETE_DOMAIN}" ]; then
+    a2dissite ${DELETE_DOMAIN}
+    rm -f /etc/apache2/sites-available/"${DELETE_DOMAIN}"
+    sed -i "s@/home/sites/${DELETE_DOMAIN}/www/logs/\*\.log @@" /etc/logrotate.d/apache2
+  fi
+}
+
+
+#########################
+# Moin
+#########################
+configure_moin() {
+  cat > /etc/apache2/sites-available/"${DOMAIN}" << EOF
+<VirtualHost *:80>
+    Use Moin-http ${DOMAIN}
+</VirtualHost>
+
+<VirtualHost *:443>
+    Use Moin-https ${DOMAIN}
+</VirtualHost>
+EOF
+  a2ensite ${DOMAIN}
+  sed -i "/\(\"mywiki\", r\"\.\*\"\)/ a \ \ \ \ \(\"${DOMAIN_UNDERSCORE}\", r\"\^https?://$ESCAPED_DOMAIN/\.\*\$\"\)," /etc/moin/farmconfig.py
+  sed "s/MyWiki/$MOIN_TITLE/;s@data_dir = '.*@data_dir = '/home/sites/${DOMAIN}/www/moin/data/'\n \ \ \ data_underlay_dir = '/home/sites/${DOMAIN}/www/moin/underlay/'@" /etc/moin/mywiki.py > /etc/moin/${DOMAIN_UNDERSCORE}.py
+  mkdir /home/sites/${DOMAIN}/www/moin
+  cp -R /usr/share/moin/{data,underlay} /home/sites/${DOMAIN}/www/moin/
+  cp /usr/share/moin/server/moin.cgi /home/sites/${DOMAIN}/www/cgi-bin/
+  cp /usr/share/moin/htdocs/robots.txt /home/sites/${DOMAIN}/www/moin/ 
+  moin --config-dir=/etc/moin/ --wiki-url=http://${DOMAIN} account create --name=$MOIN_USER --password=$MOIN_USER_PASSWORD --alias=$MOIN_USER_ALIAS --email=$MOIN_USER_EMAIL
+  chown -R www-data:www-data /home/sites/${DOMAIN}/www/moin
+  find /home/sites/${DOMAIN}/www/moin -type d -exec chmod 770 {} \;
+  find /home/sites/${DOMAIN}/www/moin -type f -exec chmod 660 {} \;
+#  chmod -R ug+rwx /home/sites/${DOMAIN}/www/moin
+#  chmod -R o-rwx /home/sites/${DOMAIN}/www/moin
+  MAIL_DATA="
+    + Moin user:
+          $MOIN_USER
+    + Moin user password:
+          $MOIN_USER_PASSWORD
+    + Moin user alias:
+          $MOIN_USER_ALIAS
+    + Moin user email:
+          $MOIN_USER_EMAIL
+    Moin directory: /www/moin
+  "
+}
+
+delete_moin() {
+  if [ -f /etc/moin/${DOMAIN_UNDERSCORE}.py ]; then
+    a2dissite ${DELETE_DOMAIN}
+    rm /etc/apache2/sites-available/${DELETE_DOMAIN}
+    sed -i "/^\ \ \ \ ${DOMAIN_UNDERSCORE}/d" /etc/moin/farmconfig.py  
+    rm -f /etc/moin/${DOMAIN_UNDERSCORE}.py
+  fi
+}
+
+#########################
+# Wordpress
+#########################
+configure_wordpress() {
+  cat > /etc/apache2/sites-available/"${DOMAIN}" << EOF
+<VirtualHost *:80>
+    Use WordPress-http ${DOMAIN}
+</VirtualHost>
+
+<VirtualHost *:443>
+    Use WordPress-https ${DOMAIN}
+</VirtualHost>
+EOF
+  a2ensite ${DOMAIN}
+  mkdir /home/sites/${DOMAIN}/www/wordpress
+  find /usr/share/wordpress/ -maxdepth 1 -mindepth 1 -exec ln -s {} /home/sites/${DOMAIN}/www/wordpress/ \;
+  ln -s /var/www/favicon.ico /home/sites/${DOMAIN}/www/wordpress/
+
+
+  rm /home/sites/${DOMAIN}/www/wordpress/wp-content
+
+  /etc/wordpress/setup-mysql -n $WP_DATABASE_USERNAME ${DOMAIN}
+  WP_DATABASE_PASSWORD=`awk -F \' '/DB_PASSWORD/ { print $4 }' /etc/wordpress/config-${DOMAIN}.php`
+  rm /home/sites/${DOMAIN}/www/wordpress/wp-content/{themes,plugins}
+  mkdir /home/sites/${DOMAIN}/www/wordpress/wp-content/{themes,plugins}
+#  ln -s /var/lib/wordpress/wp-content/themes/* /home/sites/${DOMAIN}/www/wordpress/wp-content/themes
+#  ln -s /var/lib/wordpress/wp-content/plugins/* /home/sites/${DOMAIN}/www/wordpress/wp-content/plugins
+  chown -R www-data /home/sites/${DOMAIN}/www/wordpress/wp-content
+  #Two following lines are the because of upgrading plugins/themes through FTP+TLS
+  mkdir /home/sites/${DOMAIN}/www/wordpress/wp-content/upgrade
+  chown -R ${DOMAIN}:www-data /home/sites/${DOMAIN}/www/wordpress/wp-content/{upgrade,themes,plugins}
+
+  sed -i "/\?>/ i\\\n\
+#This will disable the update notification.\\n\
+define('WP_CORE_UPDATE', false);\\n\
+\\n\
+/** Database Charset to use in creating database tables. */\\n\
+define('DB_CHARSET', 'utf8');\\n\
+\\n\
+/** The Database Collate type. Don't change this if in doubt. */\\n\
+define('DB_COLLATE', '');\\n\
+\\n\
+define('FORCE_SSL_ADMIN', true);\\n\
+define('FORCE_SSL_LOGIN', true);\\n\
+define('OPENID_SSL', true);\\n\
+\\n\
+define('FTP_BASE', '/www/wordpress');\\n\
+define('FTP_CONTENT_DIR', '/www/wordpress/wp-content/');\\n\
+define('FTP_PLUGIN_DIR', '/www/wordpress/wp-content/plugins/');\\n\
+define('FTP_USER', '${DOMAIN}');\\n\
+define('FTP_PASS', '${USER_PASSWORD}');\\n\
+define('FTP_HOST', '127.0.0.1');\\n\
+define('FTP_SSL', true);\\n\
+define('WP_POST_REVISIONS', 5);\\n\
+define('WP_CACHE', true);\\n\
+define('WP_ALLOW_MULTISITE', false);\\n\
+define('WP_POST_REVISIONS', 3);\\n\
+" /etc/wordpress/config-${DOMAIN}.php
+
+  echo "Creating installation file: /home/sites/${DOMAIN}/www/wordpress/my_installation.php"
+
+# http://www.tcbarrett.com/2012/01/wordpress-installation-script/
+# http://www.kathyisawesome.com/421/customizing-wordpress-install/
+
+  cat > /home/sites/${DOMAIN}/www/wordpress/my_installation.php << EOF
+<?php
+define('WP_SITEURL', 'http://${DOMAIN}/');
+define('WP_INSTALLING', true);
+
+require_once 'wp-load.php';
+require_once 'wp-admin/includes/upgrade.php';
+require_once 'wp-includes/wp-db.php';
+
+\$result = wp_install('$WP_TITLE', '$WP_ADMIN_NAME', '$WP_ADMIN_EMAIL', true, null, '$WP_ADMIN_PASSWORD');
+
+if ( is_wp_error( \$result ) ) {
+   \$error_string = \$result->get_error_message();
+   echo '<div id="message" class="error"><p>' . \$error_string . '</p></div>';
+}
+
+echo "WordPress installed successfully...\n\n";
+var_dump(\$result);
+
+// Delete the first post
+wp_delete_post( 1, true );
+
+// Delete the default about page
+wp_delete_post( 2, true );
+
+echo "Configuring settings...\n\n";
+\$settings = array(
+  'date-time'  => array( 'date_format'=>'Y/d/m', 'time_format'=>'H:i','timezone_string'=>'Europe/Prague' ),
+  'permalinks' => array( 'permalink_structure'=>'/%year%/%monthnum%/%postname%/' ),
+);
+foreach( \$settings as \$group => \$options ) {
+  echo "[\$group]\n";
+  foreach( \$options as \$key => \$val ){
+    echo "\t\$key -> \$val\n";
+    update_option( \$key, \$val );
+  }
+  echo "\n";
+}
+?>
+EOF
+
+  cat > /home/sites/${DOMAIN}/www/wordpress/my_plugin_installation.php << EOF
+<?php
+
+require_once 'wp-load.php';
+
+// Force WordPress to update the plugin list
+wp_update_plugins();
+\$plugins = get_plugins();
+
+if ( empty(\$plugins) )
+  printf('There are no plugins installed on this site.');
+
+foreach (\$plugins as \$file => \$plugin) {
+  if ( false === strpos( \$file, '/' ) )
+    \$name = str_replace('.php', '', basename(\$file));
+  else
+    \$name = dirname(\$file);
+  \$result = activate_plugin( \$file );
+  if ( is_wp_error( \$result ) ) {
+    foreach ( \$result->get_error_messages() as \$err )
+    print("FAILED: {\$err}\n");
+  } else {
+    printf( "Plugin <b>\$name</b> [ <i>\$file</i> ] activated.<br/>\n" );
+  }
+}
+?>
+EOF
+  if [ -z $EMAIL ]; then 
+    EMAIL=$WP_ADMIN_EMAIL
+  fi
+  MAIL_DATA="
+    + Database name:
+          $WP_DATABASE_USERNAME
+    + Database user:
+          $WP_DATABASE_USERNAME
+    + Database password: 
+          $WP_DATABASE_PASSWORD
+    + phpMyAdmin URL:
+          https://${DOMAIN}/my_db_admin
+    + Wordpress Title:
+          $WP_TITLE
+    + Wordpress admin page:
+          https://${DOMAIN}/wp-admin/
+    + Wordpress admin:
+          $WP_ADMIN_NAME
+    + Wordpress admin email:
+          $WP_ADMIN_EMAIL
+    + Wordpress admin password:
+          $WP_ADMIN_PASSWORD
+    Wordpress directory: /www/wordpress
+  "
+}
+
+delete_wordpress() {
+  if [ -f /etc/wordpress/config-${DELETE_DOMAIN}.php ]; then
+    a2dissite ${DELETE_DOMAIN}
+    rm /etc/apache2/sites-available/${DELETE_DOMAIN}
+    yes | /etc/wordpress/setup-mysql -d ${DELETE_DOMAIN}
+    rm -f /etc/wordpress/config-${DELETE_DOMAIN}.php
+  fi
+}
+
+########################
+# awstats
+########################
+configure_awstats() {
+  mkdir /home/sites/${DOMAIN}/www/awstats
+  sed "s@^LogFile.*@LogFile=\"/home/sites/${DOMAIN}/www/logs/access.log.1\"@;s/^SiteDomain.*/SiteDomain=\"${DOMAIN}\"/;s/^HostAliases.*/HostAliases=\"localhost 127.0.0.1\"/;" /etc/awstats/awstats.http-xvx.cz.conf > /etc/awstats/awstats.http-${DOMAIN}.conf
+  sed "s@^LogFile.*@LogFile=\"/home/sites/${DOMAIN}/www/logs/ssl_access.log.1\"@" /etc/awstats/awstats.http-${DOMAIN}.conf > /etc/awstats/awstats.https-${DOMAIN}.conf
+}
+
+delete_awstats() {
+  test -f /etc/awstats/awstats.http-${DELETE_DOMAIN}.conf && rm /etc/awstats/awstats.http-${DELETE_DOMAIN}.conf /etc/awstats/awstats.https-${DELETE_DOMAIN}.conf
+}
+
+
+########################
+# quota
+########################
+configure_quota() {
+  setquota ${DOMAIN} 950000 1000000 90000000 99000000 /home
+#setquota fedora.xvx.cz -T 1 2 -a
+}
+
+#########################
+# Send email with information
+#########################
+send_info_email() {
+  mailx -s "$DOMAIN activated" -a $SITES_BASEDIR/${DOMAIN}/.ssh/id_rsa -a /var/www/my-ca.crt -b root $EMAIL << EOF
+Hello.
+
+Here you can find the useful data to your domain: ${DOMAIN}
+
+    Web: http://${DOMAIN} | https://${DOMAIN}
+
+    * Email attachmnts:
+     - CA public certificate:
+           my-ca.crt [ MD5: `md5sum /var/www/my-ca.crt | awk '{print $1}'` ]
+     - SSH private key:
+           id_rsa [ MD5: `md5sum $SITES_BASEDIR/${DOMAIN}/.ssh/id_rsa | awk '{print $1}'` ]
+
+
+    * Username: ${DOMAIN}
+    * Password: $USER_PASSWORD
+
+     - FTP TLS access: ${DOMAIN}
+       ftp://${DOMAIN}:$USER_PASSWORD@${DOMAIN}
+
+     - SFTP access: ${DOMAIN}:2222
+       sftp://${DOMAIN}:$USER_PASSWORD@${DOMAIN}:2222/
+
+    * Directory/File structure:
+        - HTML pages directory:
+              /www/htdocs
+        - cgi-bin directory:
+              /www/cgi-bin
+        - Apache logs directory:
+              /www/logs
+        - Private certificate:
+              /www/ssl/${DOMAIN}-server.key, /www/ssl/${DOMAIN}-server.key.decrypted
+        - Public certificate:
+              /www/ssl/${DOMAIN}-server.crt
+        - Certificate request:
+              /www/ssl/${DOMAIN}-server.csr
+        - SSH private+public keys: 
+              /ssh
+
+    * Statistics:
+        - Awstats HTTP / HTTPS:
+              http://${DOMAIN}/awstats/
+              https://${DOMAIN}/awstats/ 
+
+
+    -> Connection guide: http://youtu.be/3NQp613llRA
+
+$MAIL_DATA
+Enjoy :-)
+EOF
+}
+
+
+
+
+
+
+
+#########################
+# Main 
+#########################
+while getopts ":-:" opt; do
+  case "${opt}" in
+    -)
+      case "${OPTARG}" in
+        moin=yes)
+           MOIN=1
+          ;;
+        moin-sitename=*)
+           MOIN_TITLE=${OPTARG#*=}
+          ;;
+        moin-user=*)
+           MOIN_USER=${OPTARG#*=}
+          ;;
+        moin-user-alias=*)
+           MOIN_USER_ALIAS=${OPTARG#*=}
+          ;;
+        moin-user-password=*)
+           MOIN_USER_PASSWORD=${OPTARG#*=}
+          ;;
+        moin-user-email=*)
+           MOIN_USER_EMAIL=${OPTARG#*=}
+          ;;
+        wordpress-password=*)
+           WP_ADMIN_PASSWORD=${OPTARG#*=}
+          ;;
+        wordpress-title=*)
+           WP_TITLE=${OPTARG#*=}
+          ;;
+        wordpress-admin-email=*)
+           WP_ADMIN_EMAIL=${OPTARG#*=}
+          ;;
+        wordpress-admin-name=*)
+           WP_ADMIN_NAME=${OPTARG#*=}
+          ;;
+        moin=yes)
+           MOIN=1
+          ;;
+        user-password=*)
+           USER_PASSWORD=${OPTARG#*=}
+          ;;
+        ca-password=*)
+           CA_PASSWORD=${OPTARG#*=}
+          ;;
+        cert-password=*)
+           CERT_PASSWORD=${OPTARG#*=}
+          ;;
+        domain=*)
+           DOMAIN=${OPTARG#*=}
+          ;;
+        email=*)
+           EMAIL=${OPTARG#*=}
+          ;;
+        delete=*)
+           DOMAIN=${OPTARG#*=}
+           DELETE_DOMAIN=$DOMAIN
+          ;;
+        *)
+          if [ "$OPTERR" = 1 ] ; then
+            echo "Unknown option --${OPTARG}" >&2
+            usage;
+          fi
+          ;;
+      esac
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      usage;
+      ;;
+  esac
+done
+
+(
+set -x
+
+CERT_PATH="/etc/ssl/localcerts/"${DOMAIN}"/httpd"
+DNS_BASEDIR=/etc/bind/domains
+APACHE_SITES=/etc/apache2/sites-available
+IP=`ifconfig eth3 | grep 'inet addr:'| cut -d: -f2 | awk '{ print $1}'`
+REVERSE_IP=`echo $IP | sed -r 's/([0-9]+).([0-9]+).([0-9]+).([0-9]+)/\3.\2.\1/'`
+LAST_OCTET=`echo $IP | sed -r 's/[0-9]+.[0-9]+.[0-9]+.([0-9]+)/\1/'`
+SITES_BASEDIR=/home/sites
+ESCAPED_DOMAIN=`echo ${DOMAIN} | sed 's/\./\\\\\\\\\\\./g'`
+DOMAIN_UNDERSCORE=`echo ${DOMAIN} | tr . _`
+WP_TMP_DATABASE_USERNAME="wp_$(echo $DOMAIN | sed 's,\.,,g;s,-,,g')"
+#Max MYSQL user lenght is 16
+#This is not the best solution for longer DOMAINS
+WP_DATABASE_USERNAME=${WP_TMP_DATABASE_USERNAME:0:16}
+#I'm ignoring .co.uk and simmilar domains
+if [ `echo $DOMAIN | tr -cd . | wc -c` == 2 ]; then 
+  THIRD_LEVEL_DOMAIN=`echo $DOMAIN | awk --field-separator . '{ print $1 }'`
+  SECOND_LEVEL_DOMAIN=`echo $DOMAIN | sed 's/[^.]*\.\(.*\)/\1/'`
+  if [ ! -s $DNS_BASEDIR/${SECOND_LEVEL_DOMAIN}/db.${SECOND_LEVEL_DOMAIN} ]; then
+    echo "Primary domain \"${SECOND_LEVEL_DOMAIN}\" doesn't exist. Can not create $DOMAIN !!!"
+    exit 2
+  fi 
+else 
+  SECOND_LEVEL_DOMAIN=$DOMAIN
+fi
+
+
+
+#* Create only DNS records: 
+#    $0 --domain="xvx.cz"
+if [ -n "$DOMAIN" ] && [ $# -eq 1 ]; then 
+  echo "Running only DNS configuration: $DOMAIN"
+  configure_dns;
+  service bind9 restart
+
+#* Create wordpress site
+#    $0 --wordpress-password="xxxx" --wordpress-title="linux.xvx.cz" --wordpress-admin-email="webmaster@xvx.cz" --wordpress-admin-name="admin" --user-password="xxxx" --ca-password="xxxxx" --domain="linux.xvx.cz" --cert-password="xxxx" --email=test@test.com
+  elif [ -n "$WP_ADMIN_PASSWORD" ] && [ -n "$WP_TITLE" ] && [ -n "$WP_ADMIN_EMAIL" ] && [ -n "$WP_ADMIN_NAME" ] && [ -n "$USER_PASSWORD" ] && [ -n "$CA_PASSWORD" ] && [ -n "$DOMAIN" ] && [ -n "$CERT_PASSWORD" ] && [ -n "$EMAIL" ] && [ $# -eq 9 ]; then 
+    echo "Configuring Wordpress: $DOMAIN"
+    configure_dns; service bind9 restart
+    create_user_home;
+    configure_ssh;
+    configure_vsftpd;
+    configure_ssl_cetificate;
+    configure_basic_apache;
+    configure_wordpress;
+    configure_awstats;
+    configure_quota;
+    apachectl configtest && service apache2 reload
+    sleep 1
+    mkdir /var/log/sites/${DOMAIN}
+    wget --no-proxy --no-verbose http://${DOMAIN}/my_installation.php -O /var/log/sites/${DOMAIN}/sites-my_installation.php-out-`date +%F-%R`.log
+#    wget --no-proxy --no-verbose http://${DOMAIN}/my_plugin_installation.php -O /var/log/sites/${DOMAIN}/sites-my_plugin_installation.php-out-`date +%F-%R`.log
+    mv /home/sites/${DOMAIN}/www/wordpress/my_installation.php /var/log/sites/${DOMAIN}/sites-my_installation.php-`date +%F-%R`
+#    mv /home/sites/${DOMAIN}/www/wordpress/my_plugin_installation.php /var/log/sites/${DOMAIN}/sites-my_plugin_installation.php-`date +%F-%R`
+    tail /home/sites/${DOMAIN}/www/logs/error.log > /var/log/sites/${DOMAIN}/error.log
+    send_info_email;
+
+#* Create Moin site
+#    $0 --moin-sitename="a.xvx.cz" --moin-user="admin" --moin-user-alias="admin" --moin-user-password="xxxx" --moin-user-email="admin@a.xvx.cz" --user-password="xxxx" --ca-password="xxxxx" --domain="a.xvx.cz" --cert-password="xxxx" --email=test@test.com
+    elif [ -n "$MOIN_TITLE" ] && [ -n "$MOIN_USER" ] && [ -n "$MOIN_USER_ALIAS" ] && [ -n "$MOIN_USER_PASSWORD" ] && [ -n "$MOIN_USER_EMAIL" ] && [ -n "$USER_PASSWORD" ] && [ -n "$CA_PASSWORD" ] && [ -n "$DOMAIN" ] && [ -n "$CERT_PASSWORD" ]  && [ -n "$EMAIL" ] && [ $# -eq 10 ]; then 
+      echo "Configuring MoinMoin: $DOMAIN"
+      configure_dns; service bind9 restart
+      create_user_home;
+      configure_ssh;
+      configure_vsftpd;
+      configure_ssl_cetificate;
+      configure_basic_apache;
+      configure_moin;
+      configure_awstats;
+      configure_quota;
+      
+      apachectl configtest && service apache2 reload
+      send_info_email;
+
+#* Create simple space for html pages
+#    $0 --user-password="xxxx" --ca-password="xxxxx" --domain="medlanky.net" --cert-password="xxxx" --email=test@test.com
+      elif [ -n "$USER_PASSWORD" ] && [ -n "$CA_PASSWORD" ] && [ -n "$DOMAIN" ] && [ -n "$CERT_PASSWORD" ] && [ -n "$EMAIL" ] && [ $# -eq 5 ]; then
+        echo "Configuring default: $DOMAIN"
+        configure_dns; service bind9 restart
+        create_user_home;
+        configure_ssh;
+        configure_vsftpd;
+        configure_ssl_cetificate;
+        configure_basic_apache;
+        configure_awstats;
+        configure_quota;
+        a2ensite ${DOMAIN}
+        apachectl configtest && service apache2 reload
+        send_info_email;
+
+#* Delete domain
+#    $0 --delete="medlanky.net" --ca-password="xxxxx" --email="admin@a.xvx.cz"
+        elif [ -n "$DELETE_DOMAIN" ] && [ -n "$CA_PASSWORD" ] && [ -n "$EMAIL" ] && [ $# -eq 3 ]; then 
+          echo "Deleting domain: $DELETE_DOMAIN"
+          delete_dns;
+          delete_vsftpd;
+          delete_ssl_cetificate;
+          delete_moin;    
+          delete_wordpress;
+          delete_awstats;
+          delete_basic_apache;
+          delete_user_home;
+        else
+          echo "Not enough/wrong parameters !"
+          usage;
+fi
+
+) 2>&1 | tee -a /var/log/sites/sites-${DOMAIN}-`date +%F-%R`.log

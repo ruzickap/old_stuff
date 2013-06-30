@@ -1,0 +1,23 @@
+#!/bin/bash
+#http://www.prefetch.net/articles/checkcertificate.html
+
+SSL_CERT_CHECK_FILE="/tmp/ssl-cert-check_file"
+
+#ftp: openssl s_client -connect 127.0.0.1:21 -starttls ftp
+for FILE in `grep -l :443 /etc/apache2/sites-available/*`; do 
+  awk '/ServerName/ {print $2,"\t\t443"}' $FILE | uniq >> ${SSL_CERT_CHECK_FILE}
+done
+
+ssl-cert-check  -a -x 30 -i -f ${SSL_CERT_CHECK_FILE}
+#-e petr.ruzicka@gmail.com
+#rm ${SSL_CERT_CHECK_FILE}
+
+for CRT in `find /etc/ssl -name "*.crt" -o -name "*.cer" | sort`; do
+  CRT_DATE=`openssl x509 -in $CRT  -noout -text | awk '/Not After/ { printf "%s %s",$4,$7 }'`
+  DATE=`date +"%b %Y"`
+  if [ "$CRT_DATE" = "$DATE" ]; then
+    echo "Certificate is going to expire this month!"
+    echo -en "*** $CRT: \t\t"
+    echo "$CRT_DATE = $DATE";
+  fi
+done

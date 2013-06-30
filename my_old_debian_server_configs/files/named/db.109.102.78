@@ -1,0 +1,14 @@
+; BIND reverse database file for zone 188.176.89.
+$TTL 3D
+@               IN      SOA     ns.xvx.cz.        root.xvx.cz. (
+                        2012050801 ; serial
+                        3H ; refresh
+                        1H ; retry
+                        1W ; expire
+                        1H) ; default_ttl
+
+                NS      ns.xvx.cz.
+                NS      ns2.xvx.cz.
+
+176		PTR	ns.xvx.cz.
+176		PTR	xvx.cz.

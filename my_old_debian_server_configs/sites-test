@@ -1,0 +1,67 @@
+#!/bin/bash
+
+set -x
+#NEW_DOMAIN="debian.xvx.cz"
+NEW_DOMAIN="linux.xvx.cz"
+
+USER_PASSWORD="xxxx"
+IP=`ifconfig eth3 | grep 'inet addr:'| cut -d: -f2 | awk '{ print $1}'`
+REVERSE_IP=`echo $IP | sed -r 's/([0-9]+).([0-9]+).([0-9]+).([0-9]+)/\3.\2.\1/'`
+LAST_OCTET=`echo $IP | sed -r 's/[0-9]+.[0-9]+.[0-9]+.([0-9]+)/\1/'`
+SITES_BASEDIR=/home/sites
+TMP_DIRECTORY="/tmp/${NEW_DOMAIN}"
+
+
+mkdir $TMP_DIRECTORY
+cd $TMP_DIRECTORY
+
+#Generate WWW logs
+wget --no-directories --no-check-certificate --spider --level=1 -r http://${NEW_DOMAIN} --output-file=/$TMP_DIRECTORY/${NEW_DOMAIN}-http-wget &
+wget --no-directories --no-check-certificate --spider --level=1 -r https://${NEW_DOMAIN} --output-file=/$TMP_DIRECTORY/${NEW_DOMAIN}-https-wget &
+
+FTP_MKDIR_COMMANDS=`find $SITES_BASEDIR/${NEW_DOMAIN} -type d -printf "mirror --verbose=3 --reverse /etc/acpi %P/; "`
+FTP_RMDIR_COMMANDS=`find $SITES_BASEDIR/${NEW_DOMAIN} -type d -name acpi -printf "rm -rf %P/; "`
+
+#SFTP tests
+mkdir $TMP_DIRECTORY/${NEW_DOMAIN}-sftp-mirror
+cd $TMP_DIRECTORY/${NEW_DOMAIN}-sftp-mirror
+lftp -e "open sftp://${NEW_DOMAIN}:xxxx@${NEW_DOMAIN}:2222/; mirror -v /; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-sftp-mirror.log
+lftp -e "open sftp://${NEW_DOMAIN}:xxxx@${NEW_DOMAIN}:2222/; $FTP_MKDIR_COMMANDS; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-sftp-write.log
+find $SITES_BASEDIR/${NEW_DOMAIN}/ -name acpi -ls >> /$TMP_DIRECTORY/${NEW_DOMAIN}-sftp-write.log
+lftp -e "open sftp://${NEW_DOMAIN}:xxxx@${NEW_DOMAIN}:2222/; $FTP_RMDIR_COMMANDS; exit;" >> /$TMP_DIRECTORY/${NEW_DOMAIN}-sftp-write.log
+lftp -e "open sftp://${NEW_DOMAIN}:xxxx@${NEW_DOMAIN}:2222/; find /; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-sftp-find.log
+
+#TLS test
+mkdir $TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-mirror
+cd $TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-mirror
+lftp -e "set ssl:ca-file /var/www/my-ca.crt ; open ftp://${NEW_DOMAIN}:xxxx@ftp.xvx.cz/; mirror -v /; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-mirror.log
+lftp -e "set ssl:ca-file /var/www/my-ca.crt ; open ftp://${NEW_DOMAIN}:xxxx@ftp.xvx.cz/; $FTP_MKDIR_COMMANDS; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-write.log
+find $SITES_BASEDIR/${NEW_DOMAIN}/ -name acpi -ls >> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-write.log
+lftp -e "set ssl:ca-file /var/www/my-ca.crt ; open ftp://${NEW_DOMAIN}:xxxx@ftp.xvx.cz/; $FTP_RMDIR_COMMANDS; exit;" >> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-write.log
+lftp -e "set ssl:ca-file /var/www/my-ca.crt ; open ftp://${NEW_DOMAIN}:xxxx@ftp.xvx.cz/; find /; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftptls-find.log
+
+#FTP anonymous (No TLS)
+lftp -e "set ftp:ssl-allow no; open ftp://ftp.xvx.cz/; mirror --verbose=3 --reverse /etc/acpi /; cd incoming; dir; mirror --verbose=3 --reverse /etc/acpi .; dir; find /; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftpanon.log
+find /srv/ftp -ls >> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftpanon.log
+
+#This should cause error "530 Non-anonymous sessions must use encryption." (No TLS)
+lftp -e "debug; set ftp:ssl-allow no; open ftp://ruzickap:xxxx@ftp.xvx.cz/; dir /; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftpuser-notls.log
+
+#Normal FTP user + TLS
+lftp -e "debug; set ssl:verify-certificate no; open ftp://ruzickap:xxxx@ftp.xvx.cz/; mirror --verbose=3 --reverse /etc/acpi .; find /home/ruzickap; dir /; rm -rf acpi; exit;" &> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftpuser-tls.log
+find /home/ruzickap -ls >> /$TMP_DIRECTORY/${NEW_DOMAIN}-ftpuser-tls.log
+
+echo | openssl s_client -connect $NEW_DOMAIN:ftp -CAfile /var/www/my-ca.crt -starttls ftp -showcerts &> /$TMP_DIRECTORY/$NEW_DOMAIN-ftptls-showcerts
+echo | openssl s_client -connect $NEW_DOMAIN:https -CAfile /var/www/my-ca.crt -showcerts &> /$TMP_DIRECTORY/$NEW_DOMAIN-https-showcerts
+
+#SFTP tests + certificate
+mkdir $TMP_DIRECTORY/${NEW_DOMAIN}-sftp-cert
+cd $TMP_DIRECTORY/${NEW_DOMAIN}-sftp-cert
+sftp -p -P 2222 -r -i $SITES_BASEDIR/${NEW_DOMAIN}/.ssh/id_rsa ${NEW_DOMAIN}@${NEW_DOMAIN}: . &> /$TMP_DIRECTORY/${NEW_DOMAIN}-sftp-cert.log
+
+#mount -t nfs 192.168.122.49:/data /tmp/xxx
+
+rdiff-backup --print-statistics --no-acls --remote-schema "ssh -p 2222 -i /home/backups/.ssh/id_rsa-rdiff -C -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %s" /home/data backups@localhost::/home/backups/test-rdiff/
+rsync --progress --stats --inplace --partial --human-readable --recursive --hard-links --links --times --chmod=Du+rwx,go-rwx,Fu+rw,go-rw,a-x --no-perms --delete-after -e "ssh -p 2222 -i /home/backups/.ssh/id_rsa-rsync-peru-android -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null " /home/{data,data2,ruzickap} backups@localhost:/home/backups/peru-android
+
+# dnsmasq --keep-in-foreground --no-daemon --conf-file=/etc/dnsmasq.d/my-dnsmasq.conf --dhcp-leasefile=/tmp/dnsmasq-test

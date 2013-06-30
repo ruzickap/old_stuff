@@ -1,0 +1,52 @@
+<!-- This file contains the mapping of LIRC keys to XBMC keys used in Keymap.xml  -->
+<!--                                                                              -->
+<!-- How to add remotes                                                           -->
+<!-- <remote device="name_Lirc_calls_the_remote">                                 -->
+<!--                                                                              -->
+<!-- For the commands the layout following layout is used                         -->
+<!-- <XBMC_COMMAND>LircButtonName</XBMC_COMMAND>                                  -->
+<!--                                                                              -->
+<!-- For a list of XBMC_COMMAND's check out the <remote> sections of keymap.xml   -->
+
+<lircmap>
+	<remote device="Samsung_BN59-00937A">
+		<pause>Pause</pause>
+		<stop>Stop</stop>
+		<forward>Forward</forward>
+		<reverse>Rewind</reverse>
+		<left>Left</left>
+		<right>Right</right>
+		<up>Up</up>
+		<down>Down</down>
+		<select>Enter</select>
+		<pageplus>Chan+</pageplus>
+		<pageminus>Chan-</pageminus>
+		<back>Return</back>
+		<menu>Menu</menu>
+		<title>Play</title>
+		<info>Info</info>
+		<record>Record</record>
+		<volumeplus>Vol+</volumeplus>
+		<volumeminus>Vol-</volumeminus>
+		<display>AD</display>
+		<mute>Mute</mute>
+		<power>Power</power>
+		<one>1</one>
+		<two>2</two>
+		<three>3</three>
+		<four>4</four>
+		<five>5</five>
+		<six>6</six>
+		<seven>7</seven>
+		<eight>8</eight>
+		<nine>9</nine>
+		<zero>0</zero>
+		<red>Red</red>
+		<green>Green</green>
+		<yellow>Yellow</yellow>
+		<blue>Blue</blue>
+		<record>Record</record>
+		<subtitle>Subt.</subtitle>
+		<language>Source</language>
+	</remote>
+</lircmap>

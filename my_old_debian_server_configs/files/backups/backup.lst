@@ -1,0 +1,34 @@
+/home/backup/bin
+
+/etc
+
+- /home/backups
+- /home/data
+- /home/data2
+- /home/ruzickap/data2
+- /home/ruzickap/public_html/sunrise
+- /home/ruzickap/.sunrise/cache
+- /home/ruzickap/.jd
+- /home/ruzickap/x
+/home
+
+/root
+
+- /var/lib/apt
+- /var/lib/aptitude
+- /var/lib/boinc-client
+- /var/lib/dpkg
+- /var/lib/munin
+- /var/lib/postgrey
+- /var/lib/sarg
+- /var/lib/ntop/rrd
+- /var/lib/dkms
+/var/lib
+
+- /var/cache
+- /var/backups
+- /var/spool/squid
+- /var/spool/squid3
+/var
+
+/usr/lib/cgi-bin

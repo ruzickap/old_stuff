@@ -1,0 +1,95 @@
+; BIND database file for domain xvx.cz
+$TTL 3D
+@               IN      SOA     ns.xvx.cz.        root.xvx.cz. (
+                        2012050801 ; serial
+                        3H ; refresh
+                        1H ; retry
+                        3W ; expire
+                        1H ) ; default_ttl
+
+                        NS      ns.xvx.cz.
+                        NS      ns2.xvx.cz.
+
+                        MX      0       mail
+                        MX      5       mail2
+
+xvx.cz.		   	A	78.102.109.176
+ns		   	A	78.102.109.176
+ns2 		   	A	78.102.109.176
+gate		   	A	78.102.109.176
+mail		   	A	78.102.109.176
+mail2		   	A	78.102.109.176
+smtp		   	A	78.102.109.176
+
+openwrt-bracha	   	A	176.74.157.134
+
+peru-nb-work-wifi       A   	192.168.1.3
+andy-nb-wifi            A   	192.168.1.4
+peru-nb-old-wifi        A	192.168.1.5
+peru-android-wifi       A	192.168.1.6
+peru-android-work-wifi	A	192.168.1.7
+peru-palm-wifi          A	192.168.1.8
+RTL8187-wifi            A	192.168.1.9
+
+peru-tplink-nic         A	192.168.1.2
+
+peru-nb-work-nic        A	192.168.0.3
+
+andy-nb-nic             A	192.168.0.4
+
+peru-nb-old-nic         A	192.168.0.5
+
+peru-tv-nic             A	192.168.2.6
+
+raspberrypi-nic         A	192.168.0.7
+
+a			CNAME	gate
+att			CNAME	gate
+www.cestovani		CNAME	gate
+cestovani		CNAME	gate
+debian			CNAME	gate
+ftp			CNAME	gate
+fedora			CNAME	gate
+www.hotspot		CNAME	gate
+hotspot			CNAME	gate
+www.linux		CNAME	gate
+linux			CNAME	gate
+www.medlanky		CNAME	gate
+medlanky		CNAME	gate
+www.petr		CNAME	gate
+petr			CNAME	gate
+www.svatba		CNAME	gate
+rh			CNAME	gate
+ruzickovabozena		CNAME	gate
+www.ruzickovabozena	CNAME	gate
+bozenaruzickova		CNAME	gate
+www.bozenaruzickova	CNAME	gate
+svatba			CNAME	gate
+test			CNAME	gate
+vpn			CNAME	gate
+webcam.medlanky		CNAME	gate
+www.webcam.medlanky	CNAME	gate
+www			CNAME	gate
+
+tunnel1host	A	84.42.238.66
+tunnel1		NS	tunnel1host.xvx.cz.
+
+; DKIM filter + ADSP
+$INCLUDE /etc/postfix/default.txt
+_adsp._domainkey.xvx.cz. TXT "dkim=discardable"
+
+;SPF
+;xvx.cz.                  TXT "v=spf1 a mx ~all"
+
+;
+; subdomain for IP-over-DNS tunnelling
+;
+; $ORIGIN tunnel.xvx.cz.
+; @               IN      NS      ns.tunnel.xvx.cz.
+; ns              IN      A       62.245.107.147
+
+; These are the keys that need to be publised in the DNSKEY RRset
+;
+;$INCLUDE Kxvx.cz.+005+55086.key	;ZSK
+;$INCLUDE Kxvx.cz.+005+54072.key	;ZSKCUR
+;$INCLUDE Kxvx.cz.+005+56866.key	;KSKCUR

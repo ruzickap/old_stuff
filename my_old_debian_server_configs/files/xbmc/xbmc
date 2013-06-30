@@ -1,0 +1,73 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:     xbmc
+# Required-Start: avahi lirc
+# Required-Stop:
+# Should-Start:
+# Should-Stop:
+# Default-Start:    2 3 4 5
+# Default-Stop:     0 1 6
+# Short-Description: Starts the Xbox Media Center
+# Description: Xbox Media Center
+### END INIT INFO
+
+#PATH=/home/xbmc/xbmc-bin/bin:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+XBMC_HOME="/home/xbmc"
+XBMC_USER="xbmc"
+
+DAEMON="/usr/bin/xbmc"
+DAEMON_PID=`ps ax | grep "/bin/sh $DAEMON" | grep -v grep | awk '{ print $1}'`
+
+if [ ! `id -u` = 0 ] ; then
+  echo This script must be run as root 
+  exit 1
+fi
+
+. /lib/lsb/init-functions
+
+test -r /etc/default/xbmc && . /etc/default/xbmc
+
+if [ "$START_XBMC" -ne 1 ]; then
+ echo "Start DISABLED, please check /etc/default/xbmc"
+ exit 0
+fi
+
+test -x $DAEMON || exit
+
+
+case "$1" in
+    start)
+        if [ ! -z "$DAEMON_PID" ] ; then
+            echo "XBMC is already running!"
+        else
+            log_action_msg "Starting Xbox Media Center"
+            openvt -f -c 9 -- su --shell /bin/bash $XBMC_USER -c  "nice -n 0 startx $DAEMON -- :0 vt9  -quiet -br -nolisten tcp"
+            log_action_end_msg $?
+        fi
+        ;;
+
+    stop)
+        if [ -z "$DAEMON_PID" ] ; then
+            echo "XBMC is not running!"
+        else
+            log_action_msg "Stoping Xbox Media Center"
+            kill $DAEMON_PID
+            log_action_end_msg $?
+        fi
+        ;;
+
+    restart)
+        $0 stop
+        sleep 3
+        $0 start
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart}" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
