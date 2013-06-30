@@ -1,0 +1,485 @@
+#!/usr/bin/perl -w
+# With some other Unix Os, first line may be
+#!/usr/local/bin/perl -w
+##########################
+## Smbmount All
+## Copyright(c) 2002 Petr Ruzicka
+## ruzickap@volny.cz
+## Version 0.1
+##########################
+
+# Otestuj chmody a predelej cteni parametru workgroup/computername na pomoci split
+
+use Getopt::Long;
+use locale;
+
+# Uncomment this to see the debug information
+$debug			= "1";
+
+# Where is ifconfig located
+my $ifconfig		= "ifconfig";	
+
+# What is your default interface (used by ifconfig)
+my $interface		= "eth0";		
+
+# What is your IP? ("" = autodetect)
+my $ip			= "";			
+
+# The IP-range you want to search in (see man nmap for deatils)
+my $ip_range		= "";	
+
+# 1 - Program will use small letters in group and names (originaly they are big - 0)
+my $lowcase		= "1";			
+
+# Skip shares ending with $
+my $skip_shares		= "1";
+
+# Where is mount located
+my $mount		= "mount";		
+
+# Path to mount smbshares
+my $mount_path		= ".";			
+
+# The name you want to be identify by.
+my $netbiosname		= "Anonymous";		
+
+# Where is namp located
+my $nmap 		= "nmap";	
+
+# Where is nmblookup located
+my $nmblookup		= "nmblookup";	
+
+# Other options to smbmount like (uid,gid,dmask...)
+# Example: $other_options="uid=bob,gid=bob",noexec";
+my $other_options	= "showexec,uid=ruzickap,gid=warezftp,fmask=0644";
+# codepage=cp852,iocharset=iso8859-2,
+# Password for user ($user) in smbmount (smbmount password=$pasword)
+# Password for shares
+my $password		= "";			
+
+# It describes how the directory, where the sahare should be mount, should look.
+# Example $path_look="workgroup/compname" 
+# It means the mounted share will look .../workgroup/computer_name/name_of_share
+# Example $path_look="workgroup" 
+# It means the mounted share will look .../workgroup/name_of_share
+# Example $path_look="" 
+# It means the mounted share will look .../name_of_share
+my $path_look		= "group/compname";
+
+#Rights of created directory (where shares mounted)    
+my $chmod		= "";
+
+# Owner of created directory (where shares mounted) UID:GID
+my $chown		= "";
+
+# Where is smbclient located
+my $smbclient		= "smbclient"; 
+
+# Where is smbclient located
+my $smbmount		= "smbmount";	
+
+# Where is umount located
+my $umount 		= "umount";
+
+# Where to unmount shares
+my $umount_path		= ".";				
+
+# Just umount mounted shares and finish program (= 1). For = 0 work nowmally...
+my $umount_shares = 0;
+
+# Username for smbmount (smbmount user=$user)
+# Username for shares
+my $user		= "anonymous";		
+
+ 
+#-------------------------------------------------------
+# Main
+#-------------------------------------------------------
+
+my ($help,$mounted,$mounted_all) = (0,0,0);
+
+GetOptions(
+  'debud|d' => \$debug,
+  'chmod|b=s' => \$chmod,
+  'chown|e=s' => \$chown,
+  'help|h|?' => \$help,
+  'ip|i=s' => \$ip,
+  'ip-range|r=s' => \$ip_range,
+  'interface|c=s' => \$interface,  
+  'lowcase|l=s' => \$lowcase,
+  'mount_path|m=s' => \$mount_path,
+  'netbiosname|n=s' => \$netbiosname,  
+  'other-options|o=s' => \$other_options,
+  'path-look|t=s' => \$path_look,
+  'password|p=s' => \$password,
+  'user|s=s' => \$user,
+  'umount_path|a=s' => \$umount_path,
+  'umount_shares|u' => \$umount_shares,
+  'skip_shares|k' => \$skip_shares
+);
+
+if ($help == 1) { print "
+Usage: smbmount_all [ options ]
+
+  -a, --umount_path    Where to unmount shares
+  -b, --chmod	       Change rights of created directory (where shares mounted)    
+  -c, --if	       Acces Interface (eth0)
+  -d, --debug	       Debugging mode - show all commands and their's output
+  -e, --chown	       Owner of created directory (where shares mounted) UID:GID
+  -i, --ip	       Your IP address (isn't needed)
+  -k, --skip_shares    Skip shares ending with $
+  -l, --lowcase	       Program will use small letters in group and names 
+		       (originaly they are big)  
+  -m, --mount_path     Path to mount smbshares
+  -n, --netbiosname    The name you want to be identify by.
+  -o, --other-options  Other options to smbmount (like uid,gid,dmask...)
+  -p, --password       Password for smbmount
+  -r, --ip-range       The ip-range you want to search in. 
+		       (see man nmap for deatils)
+  -s, --user	       Username for smbmount
+  -t, --path-look      It describes how the directory, where the sahare should 
+		       be mount, should look. Example \"workgroup/compname\".
+  -u, --umount_shares  Just umount mounted shares and finish program
+
+  -h, --help	       Help
+    
+"; exit(1);}  
+
+# Unmount section (&umount and execution)
+if ($umount_shares == 1) { &unmount ($umount_path); exit (0); }
+
+# Finds your IP
+if ($ip eq "") { $ip=&ifconfig_data($interface,$ifconfig); }
+
+
+$count_server = $count_workgroup = 0;
+if ((get_names_all($ip,\@server,\@comment,\$count_server,\@workgroup,\@w_master,\$count_workgroup,\$current_workgroup) ne 0) || $ip_range ne "") {
+ # Slow... just in case
+ # IP-RNAGE sction (declaration of $ip_range)
+ if ($ip_range eq "") { $ip_range = $ip; $ip_range =~ s/\d+$/\*/; }
+
+ print "\nFinding IPs ... (it may take a while)\n"; 
+ @iplist=getips($ip_range,$ip);
+
+ $count=pop(@iplist);
+ if ( $count == 0) { print STDERR "\nThere aren't any computers listening on port 139 (SMB)!\nQuitting ....\n"; exit(2); }
+ print "\n$count computers listening on port 139 has been found...\n"; 
+ 
+ my ($x,@h);
+ foreach $ipl (@iplist) {
+  $x += 1;
+  if ( $ipl ne $ip ) {
+   ($name,$group)=getname($ipl);
+   if ($name ne "") {
+    print "\n$x\. Name: $name, Group: $group, IP: $ipl\n";
+    @h = mountshares($name,$group,$user,$password,$netbiosname,$other_options,$path_look,$mount_path,$chown,$chmod,$smbmount,$smbclient);
+    $mounted += $h[0];
+    $mounted_all += $h[1];
+   }
+  }
+ }
+ print "\n\nComputers scanned for mount: $count\nMounted shares : $mounted of $mounted_all of all shares was succesfully mounted\n";
+} else {
+   print "\nTotal Workgroups : $count_workgroup\nListing : ";
+   { for(my ($x)=(0); $x<=$count_workgroup-1; $x++) { print "[$workgroup[$x],$w_master[$x]]"; }}
+   for(my ($x,@h)=(1,()); $x<=$count_server; $x++) {
+    print "\n$x\. Name: $server[$x-1] [$comment[$x-1]], Group: $current_workgroup\n";
+    @h = mountshares($server[$x-1],$current_workgroup,$user,$password,$netbiosname,$other_options,$path_look,$mount_path,$chown,$chmod,$smbmount,$smbclient);
+    $mounted += $h[0];
+    $mounted_all += $h[1];
+   }
+   print "\n\nMounted shares : $mounted of $mounted_all of all shares was succesfully mounted\n";
+}
+
+
+#-------------------------------------------------------
+# Functions
+#-------------------------------------------------------
+
+sub ifconfig_data {
+  my ($interface,$ifconfig) = @_;
+  my ($addr) = ("");
+  
+# Find and assign IP addres of scanned computer and finish cycle
+  if (defined($debug)) { print "IFCONFIG_DATA:OPEN_IFCONFIG:{$ifconfig $interface}\n"; }
+  open(IFCONFIG,"$ifconfig $interface |") or die "$?:Unable to find broadcast with ifconfig!\n";
+  while ($line = <IFCONFIG>) {
+   if (defined($debug)) { print "IFCONFIG_DATA:LINE:{$line}"; }
+   if ($line =~ /:\d*\.\d*\.\d*\.d*/) {
+    ($addr) = $line =~ m/\s*(\d+\.\d+\.\d+\.\d+)/;
+    last;
+   }
+  }
+  close (IFCONFIG);
+  return $addr;
+}
+
+sub getips {
+  my ($ip_range,$ip) = @_;
+  my ($count,$nmap,@iplist)=(0,"nmap",());
+
+# Find compuster (using NMAP) wint opened port 139 and save it to array
+  if (defined($debug)) { print "GETIPS:OPEN_NMAP:{$nmap -p 139 $ip_range}\n"; }
+  open(NMAP,"$nmap -p 139 $ip_range |") or die "$?:There was a problem with running namp!\n";
+  while ($line = <NMAP>) {
+    if (defined($debug)) { print "GETIPS2:LINE:{$line}"; }
+    if (($line =~ /^Interesting ports on/) && ($line !~ /$ip/)) { push (@iplist,$line =~ m/\s*(\d*\.\d*\.\d*\.\d*)/); $count += 1; print "."; }
+
+  }
+  close (NMAP);
+  print "\n";
+  return (@iplist,$count);
+}
+
+sub getname {
+  my ($ip) = @_;
+  my ($nmblookup,$name,$group) = ("nmblookup","","");
+  
+  if (defined($debug)) { print "GETNAME:OPEN_NMBLOOKUP:{$nmblookup -A $ip}\n"; }
+  open(NMBLOOKUP,"$nmblookup -A $ip |") or die "$?:There was a problem with running nmblookup!\n";
+  while ($line = <NMBLOOKUP>) {
+    if (defined($debug)) { print "GETNAME:LINE:{$line}"; }
+# Find computer name    
+    if ($line =~ /<00> -         /) { $name = substr($line, 1, 15); }
+# Find group name    
+    if ($line =~ /<00> - <GROUP> /) { $group = substr($line, 1, 15); }
+  }
+  close (NMBLOOKUP);
+# Deletes spaces between words  
+  $name =~ s/\s+$//;
+  $group =~ s/\s+$//;
+# Upcase string  
+
+  return ($name, $group);
+}
+
+
+
+
+
+#-------------- new
+
+
+
+
+sub get_names_all {
+ my ($ip,$server,$comment,$count_server,$workgroup,$w_master,$count_workgroup,$current_workgroup) = @_;
+ my ($master_browser_ip) = ();
+ 
+ sub get_master_browser {
+  my ($master_browser_ip) = @_;
+#  Find Master Browser using nmblookup
+  if (defined($debug)) { print "GET_NAMES_ALL:OPEN_NMBLOOKUP:{$nmblookup -M -- -}\n"; }
+  open(NMBLOOKUP,"$nmblookup -M - |") or die "$?:There was a problem with running nmblookup!\n";
+  while ($line = <NMBLOOKUP>) {
+   if (defined($debug)) { print "GET_NAMES_ALL:LINE:{$line}"; }
+   if ($line =~ /^name_query failed to find name/) { return 1; }
+   if ($line =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/) { 
+    $$master_browser_ip=substr($line,0,index($line," ")); 
+    return 0;
+   }
+  }
+ close (NMBLOOKUP);
+ return 1;
+ }
+
+ if ( get_master_browser(\$master_browser_ip) eq 1) { return 1; }
+ #Find computer (using smbclient) abd save it to array
+ if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:OPEN_SMBCLIENT:{$smbclient -N -L $master_browser_ip}\n"; }
+ open(SMBCLIENT,"$smbclient -N -L $master_browser_ip |") or die "$?:There was a problem with running smbclient!\n";
+ while ($line = <SMBCLIENT>) {
+  if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:LINE:{$line}"; }
+  if ($line =~ /^Domain=/) { $$current_workgroup=substr($line,8,index($line,"]")-8); }
+  if ($line =~ /^Connection to SERVER failed/) { return 2; }
+  if ($line =~ /^\tServer               Comment/) {
+   $line = <SMBCLIENT>;
+   if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:LINE-S:{$line}"; }
+   while (defined($line=<SMBCLIENT>) && ($line ne "\n")) {
+    if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:LINE-S:{$line}"; }
+    my $help;
+    ($help = substr($line,1,21)) =~ s/\s+$//;
+    push(@$server,$help);
+    ($help = substr($line,22)) =~ s/\s+$//;
+    push(@$comment,$help);
+    $$count_server+=1;
+    print ".";
+   }
+   if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:LINE-S:{$line}"; }
+   next;
+  }
+   
+  if ($line =~ /^\tWorkgroup            Master/) {
+   $line = <SMBCLIENT>;
+   if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:LINE-W:{$line}"; }
+   while (defined($line=<SMBCLIENT>) && ($line ne "\n")) {
+    if (defined($debug)) { print "GET_INFO_FROM_MASTER_BROWSER:LINE-W:{$line}"; }
+    ($help = substr($line,1,21)) =~ s/\s+$//;
+    push(@$workgroup,$help);
+    if ( length($line) < 24) { pop(@$workgroup); } 
+    else {
+     ($help = substr($line,22)) =~ s/\s+$//;
+     push(@$w_master,$help);
+     $$count_workgroup+=1;
+     print ".";
+    }  
+   }
+  } 
+  print "\n";    
+  next;
+ }    
+ close (SMBCLIENT);
+ return 0;
+}
+
+
+
+
+
+#-------------- new
+
+
+
+
+
+
+
+sub mountshares {
+  my ($compname,$workgroup,$user,$password,$netbiosname,$other_options,$path_look,$path,$chown,$chmod,$smbmount,$smbclient) = @_;  
+
+# path2 - because of removing (rmdir) directory
+  my ($path2,$mounted,$error,$shares_count,@sharelist,@sharecomment) = ($path,0,0,0,(),());
+
+# Function for making directory 
+  sub make_dir {
+    my ($path,$chown,$chmod) = @_;
+    
+    if (-d "$path") { print "\nDirectory \"$path\" exists ...\n"; }    
+     elsif ((mkdir ("$path")) == 0) { die "Cannot create directory: \"$path\"!\n"; }
+      else { if ($chmod ne "") { 
+	      if (defined($debug)) { print "MOUNTSHARES:MAKE_DIR:CHMOD:{$chmod:\"$path\"}\n"; }
+	      if (chmod($chmod,"$path") == 0) { die "Cannot chmod directory: \"$path\"!\n"; } 
+	     }
+             if ($chown ne "") { 
+	      my @ch=split(/:/,$chown); 
+	      if (defined($debug)) { print "MOUNTSHARES:MAKE_DIR:CHOWN:{$ch[0]:$ch[1]:\"$path\"}\n"; }
+	      if (chown($ch[0],$ch[1],"$path") == 0) { die "Cannot chown directory: \"$path\"!\n"; } 
+	     }
+           }        
+  }
+
+# Function for finding shared disks and comments
+  sub getshares {
+    my ($compname,$sharelist,$sharecomment,$smbclient) = @_;
+
+    if (defined($debug)) { print "MOUNTSHARES:GETSHARES:OPEN_SMBCLIENT:{$smbclient -N -L $compname}\n"; }
+    open(SMBCLIENT,"$smbclient -N -L \"$compname\" |") or die "$?:There was a problem with running smbclient!\n";
+    while ($line = <SMBCLIENT>) {
+      if (defined($debug)) { print "MOUNTSHARES2:GETSHARES2:LINE:{$line}"; }
+      if ($line =~ /fail/) { return 1; }
+      if ($line =~ /Disk/) {
+        my ($help) = ("");
+        chomp($line);
+# Find and save shared disks and it's commentary to array
+        ($help = substr($line, 1, 13)) =~ s/\s+$//;
+	if (! (($help=~ /\$/) && ($skip_shares eq "1"))) { 
+         push(@$sharelist, $help); 
+         push(@$sharecomment, substr($line,26));
+	}
+      }
+    }
+    close (SMBCLIENT);
+    return 0;
+  }
+  
+  if (getshares($compname,\@sharelist,\@sharecomment,$smbclient)) { 
+   print STDERR "\nI cann't find \"$compname\" !!! ERROR !!!\n";
+   return (0,0);
+  } 
+    
+  if (! defined($sharelist[0])) { 
+   print "There is no share on computer: $compname\n"; 
+   return (0,0);
+  }
+  
+# Sets how should look the path (on disk)
+  if ($path_look ne "") {
+    if (index($path_look,"w") == 0) {
+      if ($workgroup ne "") { $path="$path/$workgroup"; }
+      
+      if (index($path_look,"c") == 10) { if ($lowcase eq "1") { $path=lc($path); } make_dir("$path",$chown,$chmod); $path = "$path/$compname"; }
+    }
+    else { $path="$path/$compname";
+          if ((index($path_look,"w") == 9) && ($workgroup ne "")) { if ($lowcase eq "1") { $path=lc($path); } make_dir ("$path",$chown,$chmod); $path = "$path/$workgroup"; }
+	 }
+    if ($lowcase eq "1") { $path=lc($path); }
+    make_dir("$path",$chown,$chmod);
+  }
+
+# Add new params to $other_options - user a password
+  if ($other_options ne "") {
+   if ($user ne "") { $other_options = "username=\"$user\",$other_options"; }
+   if ($password ne "") { $other_options = "password=\"$password\",$other_options"; }
+    else { $other_options = "guest,$other_options"; }
+  }
+  else {
+   if ($user ne "") { $other_options = "user=\"$user\""; }
+    elsif ($password ne "") { $other_options = "password=\"$password\""; }
+  }
+  
+  foreach $share (@sharelist) {
+    $shares_count += 1; $error=0;
+    
+    make_dir("$path/$share",$chown,$chmod);
+    if (defined($debug)) { print "MOUNTSHARES3:OPEN_SMBMOUNT:{$smbmount \"//$compname/$share\" \"$path/$share\" -o netbiosname=\"$netbiosname\",$other_options}\n"; }
+    open(SMBMOUNT,"$smbmount \"//$compname/$share\" \"$path/$share\" -o netbiosname=\"$netbiosname\",$other_options |") or die "$?:There was a problem with running smbmount!\n";
+    while ($line = <SMBMOUNT>) {
+      if (defined($debug)) { print "MOUNTSHARES4:LINE:{$line}"; }
+      if ($line =~ /ERRSRV - ERRbadpw/) { 
+       print STDERR "\nThere is a problem with your password !!\n";  
+      }
+      $error=1;
+    }
+    close (SMBMOUNT);
+#xxx    exit;
+    if ($error != 1) { 
+     $mounted += 1;      
+     print "Mounting \"//$compname/$share\" to \"$path/$share\" [$sharecomment[$shares_count-1]]\n";
+    } 
+    else {
+     print STDERR "\nError: could not mount \"//$compname/$share\"  !!! smbmount FAILED !!!\n";
+     $share = "$path/$share";
+     while (length($path) != length($share)) {
+      if (! rmdir $share) { print STDERR "\nI can't delete directory: $share !!!\n"; last; }
+       else { print "Deleting $share\n"; }
+      $share=substr($share,0,rindex($share,"/"));
+     }
+    }
+  }  
+  if ($mounted==0) { 
+   if (! rmdir $path) { print STDERR "\nI can't delete directory: $path !!!\n"; }
+    else { print "Deleting $path\n"; }
+  }    
+  return ($mounted,$shares_count);
+}
+
+
+sub unmount {
+  my ($umount_path) = @_;
+  
+  open(MOUNT,"$mount |") or die "$?:There was a problem with running mount!\n";
+  while ($line = <MOUNT>) {
+    if (defined($debug)) { print "UMOUNT:LINE:{$line}"; }
+    if (($line =~ /$umount_path/) && ($line =~ /smbfs/)) {
+      $share=substr($line,index($line, " on ")+4,rindex($line, " type ")-index($line, " on ")-4);      
+      if (system("umount -l \"$share\"") != 0) { print STDERR "I can\'t unmount or delete: \"$share\"\n"; }
+      my $stat = 1;
+      while (length($umount_path) != length($share)) {
+        print "Removing: $share directory\n";
+	if (! rmdir $share) { print STDERR "\nI can't delete directory: $share !!!\n"; last; }
+	 else { print "Deleting $share\n"; }
+        $share=substr($share,0,rindex($share,"/"));
+      }
+    }
+  }
+  close (MOUNT);
+}

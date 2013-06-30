@@ -1,0 +1,85 @@
+#!/bin/bash
+
+#set -x
+
+#Don't write '/' at the end
+SVN_PATH="$HOME/configuration-`hostname`"
+#File containig list of files handled by repository. This file should correspond to files on SVN server.
+FILE_LIST="$SVN_PATH/files"
+#Package list file
+PACKAGES_LIST="$SVN_PATH/packages"
+
+case "$1" in
+# -u: Only for updates (cron)
+    -u)
+      shift
+      cp -p -r -f --parents `cat $FILE_LIST` $SVN_PATH || echo -e "\nIf you got 'No such file or directory' error it means some file(s) are in repository, but doesn't exist on the disk.\nYou can run 'svnci -r /some/file' to remove file from SVN and fix this error.\n"
+      rpm -qa 2>/dev/null > $PACKAGES_LIST
+      dpkg -l 2>/dev/null >> $PACKAGES_LIST
+      svn ci --message "Update (`date +\"%F %T\"`)" $SVN_PATH
+      ;;
+#Removes file from SVN
+    -r)
+      shift
+      TMP_SVNCI=`mktemp /tmp/tmp-svnc.XXX`
+      for FILE in $*; do
+        FULL_PATH_FILE="`readlink -f $FILE``test -d $FILE && echo /`"
+        SVN_FULL_PATH_FILES[${#SVN_FULL_PATH_FILES[*]}]=$FULL_PATH_FILE
+        echo -n "Removing $FULL_PATH_FILE from repository: "
+        svn rm ${SVN_PATH}${FULL_PATH_FILE}
+        grep -v $FULL_PATH_FILE $FILE_LIST 2>/dev/null > $TMP_SVNCI && mv $TMP_SVNCI $FILE_LIST
+      done
+      svn ci --message "Delete ${SVN_FULL_PATH_FILES[*]}" $SVN_PATH
+      ;;
+#Help
+    ''|-h|--help)
+      echo -e "Use: $0 <files/dirs>\n"
+      echo "	-u	Use only for updates (useful for cron)"
+      echo "	-r	Remove file from SVN"
+      ;;
+#Add files to repository
+    *)
+      for FILE in $*; do
+        if [ -r "$FILE" ]; then
+          #Show full path to file/directory
+          FULL_PATH_FILE="`readlink -f $FILE``test -d $FILE && echo /`"
+          SVN_FULL_PATH_FILES[${#SVN_FULL_PATH_FILES[*]}]=$FULL_PATH_FILE
+          #Scan for file(s) (if $FILE is directory)
+          for FIND_FILE in `find $FULL_PATH_FILE -type f` ; do
+            #Check if the file is not already in SVN
+            if grep -q $FIND_FILE $FILE_LIST 2>/dev/null ; then
+              echo "File \"$FIND_FILE\" already exist in SVN!"
+            else
+              CP_FILES[${#CP_FILES[*]}]=$FIND_FILE
+              echo $FIND_FILE >> $FILE_LIST
+            fi
+          done
+          #Sort file list alphabetically
+          if [ -w $FILE_LIST ]; then
+            TMP_SVNCI=`mktemp /tmp/tmp-svnc.XXX`
+            sort $FILE_LIST > $TMP_SVNCI && cp $TMP_SVNCI $FILE_LIST
+            rm $TMP_SVNCI
+          fi
+        else
+          echo "File \"$FILE\" doesn't exist!"
+        fi
+      done
+
+      if [ -z "${CP_FILES[*]}" ]; then
+        echo "No files found for import. Check filenames and paths (and if files already not exist in repository) !"
+        exit
+      fi
+
+      cp -v -p -r -f --parents ${CP_FILES[*]} $SVN_PATH
+
+      # Add newly coppied files to SVN
+      SVN_ADD=`svn status $SVN_PATH | grep "^\?" | sed s/?//`
+      if [ -n "$SVN_ADD" ]; then
+        echo
+        echo "$SVN_ADD" | xargs svn add
+      fi
+
+      svn ci --message "Initial: ${SVN_FULL_PATH_FILES[*]}" $SVN_PATH
+      echo "Initial: ${SVN_FULL_PATH_FILES[*]}"
+      exit
+esac

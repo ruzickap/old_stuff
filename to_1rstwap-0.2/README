@@ -1,0 +1,58 @@
+to_1rstwap.pl
+
+What ist this ?
+---------------
+
+Tento skript pomuze vsem majitelum programu KySMS, kteri maji stale v adresari
+zbytecne kontaky na telefony operatora T-Mobilu a Eurotelu 
+(t-mobil.sms,eurotel.sms). Vsichni vi ze z internetu (z brany T-mobile a 
+Eurotel) uz si zdarma (T-Mobile) nebo bez reklam (Eurotel) SMS neposleme, 
+tudiz ji musime poslat z brany na www.1rstwap.com. Tam se musi uzivatel 
+zaregistrovat a pak ma 15 volnych sms na jeden tyden skoro na jakykoli 
+mobil. Vytvoril jsem skript, ktery prepise vsechny vase kontaky z 
+T-Mobilu/Eurotelu na 1rswap. 
+Samozrejme uzivatele si musi doplnit sva jmena a hesla.
+
+
+Usage
+-----
+
+Priklad pouziti.
+V souboru phonebook.txt mam kontakt:
+
+Nick=Rosta H
+Name=Rosta H
+Group=Kamarad
+Operator=/usr/share/smssend/t-mobile.sms
+ShowNick=1
+NumberOfParameters=3
+Param000=t-mobile
+Param001=073
+Param002=1234567
+
+Abych na nej mohl dal posilat smsky musim zadat prikaz (mit ucet na 1rstwap.com):
+./t_mobil_to_1rstwap.pl $HOME/.KySMS/phonebook.txt -o=t-mobile -l=muj_login_z_1rstwap.com -p=moje_heslo_z_1rstwap.com
+
+Pak uz jen zkontrolovat soubor phonebook.txt.new a pouzit ho misto toho stareho.
+
+Vysledek:
+
+Nick=Rosta H
+Name=Rosta H
+Group=Kamarad
+Operator=/usr/share/smssend/1rstwap.sms
+ShowNick=1
+NumberOfParameters=5
+Param000=1rstwap
+Param001=muj_login_z_1rstwap.com
+Param002=moje_heslo_z_1rstwap.com
+Param003=0
+Param004=420732153844
+
+
+Hodne stesti.
+
+Contact
+-------
+Email: ruzickap@volny.cz
+Web: http://

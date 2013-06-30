@@ -1,0 +1,23 @@
+SMBMOUNT_ALL
+
+What ist this ?
+---------------
+
+smbmount_all is a simple Perl <http://www.cpan.org> script to mount all SMB
+shares on your net.
+
+Instalation
+-----------
+
+Execute ./smbmount_all for more help or just run - mounts all availeble SMB
+shares on your net.
+
+Contact
+-------
+Email: ruzickap@volny.cz
+Web: http://
+
+
+
+
+======= End

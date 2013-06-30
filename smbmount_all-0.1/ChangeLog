@@ -1,0 +1,4 @@
+Sat Jan 26 16:52:50 2002  Petr Ruzicka	<ruzickap@volny.cz>
+	* ANNOUNCE, AUTHORS, COPYING, ChangeLog, NEWS, TODO : Initial revision
+
+	* smbmount_all : Initial revision
